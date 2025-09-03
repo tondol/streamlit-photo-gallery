@@ -32,6 +32,9 @@ header {
     padding-top: 0;
     transition-duration: 0;
 }
+.stDialog .stVerticalBlock {
+    gap: 0.5rem;
+}
 div[role="dialog"] {
     margin: 0 !important;
 }
@@ -41,8 +44,8 @@ div[role="dialog"]>div:first-child {
 div[role="dialog"]>div:nth-child(2) {
     padding: 0.75rem !important;
 }
-.stDialog .stVerticalBlock {
-    gap: 0.5rem;
+div[role="dialog"]>button {
+    top: 1.5rem !important;
 }
 .element-container:has(iframe) {
     display: none;
@@ -157,15 +160,29 @@ def delete_paths(paths: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
     return successes, failures
 
 
-# チェックボックスのON/OFFを素直に動かすためのworkaround
+# チェックボックスのON/OFFをキビキビ動かすためのworkaround
 def checkbox_on_change(i: int):
     def f():
-        st.session_state.checked[str(i)] = not st.session_state.checked[str(i)]
+        st.session_state.checked[str(i)] = st.session_state[f"raw_checked_{i}"]
     return f
 
 
+# dialogを閉じたときに確実にsessionもクリアする
 def show_preview_on_dismiss():
     st.session_state.preview_index = -1
+def confirm_delete_on_dismiss():
+    st.session_state.to_delete = []
+
+
+# --------------------
+# Session state init
+# --------------------
+if "preview_index" not in st.session_state:
+    st.session_state.preview_index = -1
+if "to_delete" not in st.session_state:
+    st.session_state.to_delete = []
+if "checked" not in st.session_state:
+    st.session_state.checked = {}
 
 
 # --------------------
@@ -207,14 +224,65 @@ else:
     images.sort(key=lambda x: x[1])
 
 
-# Session state init
-if "preview_index" not in st.session_state:
-    st.session_state.preview_index = -1
-if "checked" not in st.session_state:
-    st.session_state.checked = {}
+if not images:
+    st.info("このディレクトリに表示条件に合う画像が見つかりません。")
+else:
+    # image grid
+    thumb_dir = ensure_thumb_dir(target_dir)
+    columns = st.columns(cols_per_row)
+    
+    for img_i, (img_p, _) in enumerate(images):
+        column = columns[img_i % cols_per_row]
+        thumb = generate_thumbnail_if_needed(img_p, thumb_path_for(img_p, thumb_dir))
+        with column:
+            st.image(str(thumb), use_container_width=True, caption=img_p.name)
+            key = f"raw_checked_{img_i}"
+            value = st.session_state.checked.get(str(img_i))
+            st.checkbox("選択", key=key, value=value, on_change=checkbox_on_change(img_i))
+            b1, b2 = st.columns([1, 1])
+            with b1:
+                if st.button("プレビュー", key=f"preview_{img_i}"):
+                    st.session_state.preview_index = img_i
+            with b2:
+                if st.button("削除", key=f"delete_{img_i}"):
+                    to_delete = [str(img_p)]
+                    st.session_state.to_delete = to_delete
+    
+    st.markdown("---")
+    
+    # action bar
+    with st.container():
+        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+        with c1:
+            if st.button("すべて選択"):
+                for i, _ in enumerate(images):
+                    st.session_state.checked[str(i)] = True
+                # rerunしないとcheckboxに反映されないことがある
+                st.rerun()
+        with c2:
+            if st.button("すべて解除"):
+                st.session_state.checked = {}
+                # rerunしないとcheckboxに反映されないことがある
+                st.rerun()
+        with c3:
+            cnt = sum([1 if v else 0 for _, v in st.session_state.checked.items()])
+            st.markdown(f"**選択中: {cnt} 件**")
+        with c4:
+            if st.button("選択を削除"):
+                to_delete = []
+                for k, v in st.session_state.checked.items():
+                    if v:
+                        p = images[int(k)][0]
+                        to_delete.append(str(p))
+                if len(to_delete) > 0:
+                    st.session_state.to_delete = to_delete
+                else:
+                    st.info("削除する画像が選択されていません。")
 
 
+# --------------------
 # Dialogs
+# --------------------
 @st.dialog("プレビュー", width="medium", on_dismiss=show_preview_on_dismiss)
 def show_preview():
     components.html(
@@ -239,6 +307,7 @@ doc.addEventListener('keydown', function(e) {
         width=0,
         height=0
     )
+    
     if "preview_index" in st.session_state:
         img_i = int(st.session_state.preview_index)
         img_p = images[img_i][0]
@@ -249,102 +318,51 @@ doc.addEventListener('keydown', function(e) {
             if st.button("⏪️ J"):
                 if img_i - 1 >= 0:
                     st.session_state.preview_index = img_i - 1
+                    # rerunした方が切替がスムーズ
                     st.rerun(scope="fragment")
         with c2:
             if st.button("⏩️ K"):
                 if img_i + 1 < len(images):
                     st.session_state.preview_index = img_i + 1
+                    # rerunした方が切替がスムーズ
                     st.rerun(scope="fragment")
         with c3:
             if st.button("削除 (この画像のみ)", key="dialog_delete"):
-                st.rerun()
                 to_delete = [str(img_p)]
-                confirm_dialog_contents(to_delete)
+                st.session_state.to_delete = to_delete
+                st.session_state.preview_index = -1
+                st.rerun()
 
 
-@st.dialog("削除確認")
-def confirm_delete(to_delete: List[str]):
-    targets = to_delete[:200]
-    st.warning(f"本当に削除しますか？ {len(targets)} 件の画像が削除されます。これは元に戻せません。")
-    for p in targets:
+@st.dialog("削除確認", on_dismiss=confirm_delete_on_dismiss)
+def confirm_delete():
+    to_delete = st.session_state.to_delete or []
+    to_delete = to_delete[:200]
+    st.warning(f"本当に削除しますか？ {len(to_delete)} 件の画像が削除されます。これは元に戻せません。")
+    for p in to_delete:
         st.write(p)
     if st.button("削除を実行", key="dialog_confirm"):
-        successes, failures = delete_paths(targets)
+        successes, failures = delete_paths(to_delete)
         if successes:
             st.success(f"削除しました: {len(successes)} 件")
         if failures:
             for p, err in failures:
                 st.error(f"削除失敗: {p} — {err}")
-        # clear selection state for removed files
-        for i, (p, _) in enumerate(images):
-            if not p.exists():
-                st.session_state[f"selected_{i}"] = False
+        st.session_state.checked = {}
+        st.session_state.to_delete = []
         st.rerun()
 
 
+# show_preview -> confirm_deleteの遷移を可能にするため、
+# dialogの表示状態をsession管理にしている
 if st.session_state.preview_index >= 0:
     show_preview()
-
-
-if not images:
-    st.info("このディレクトリに表示条件に合う画像が見つかりません。")
-else:
-    # image grid
-    thumb_dir = ensure_thumb_dir(target_dir)
-    columns = st.columns(cols_per_row)
-    
-    for img_i, (img_p, _) in enumerate(images):
-        column = columns[img_i % cols_per_row]
-        thumb = generate_thumbnail_if_needed(img_p, thumb_path_for(img_p, thumb_dir))
-        with column:
-            st.image(str(thumb), use_container_width=True, caption=img_p.name)
-            key = f"raw_checked_{img_i}"
-            value = st.session_state.checked.get(str(img_i))
-            checked = st.checkbox("選択", key=key, value=value, on_change=checkbox_on_change(img_i))
-            st.session_state.checked[str(img_i)] = checked
-            b1, b2 = st.columns([1, 1])
-            with b1:
-                if st.button("プレビュー", key=f"preview_{img_i}"):
-                    st.session_state.preview_index = img_i
-                    st.rerun()
-            with b2:
-                if st.button("削除", key=f"delete_{img_i}"):
-                    to_delete = [str(img_p)]
-                    confirm_delete(to_delete)
-    
-    st.divider()
-    
-    # action bar
-    with st.container():
-        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-        with c1:
-            if st.button("すべて選択"):
-                for i, _ in enumerate(images):
-                    st.session_state.checked[str(i)] = True
-                st.rerun()
-        with c2:
-            if st.button("すべて解除"):
-                st.session_state.checked = {}
-                st.rerun()
-        with c3:
-            cnt = sum([1 if v else 0 for _, v in st.session_state.checked.items()])
-            st.markdown(f"**選択中: {cnt} 件**")
-        with c4:
-            if st.button("選択を削除"):
-                to_delete = []
-                for k, v in st.session_state.checked.items():
-                    if v:
-                        p = images[int(k)][0]
-                        to_delete.append(str(p))
-                if len(to_delete) > 0:
-                    confirm_delete(to_delete)
-                else:
-                    st.info("削除する画像が選択されていません。")
+if len(st.session_state.to_delete) > 0:
+    confirm_delete()
 
 
 # --------------------
 # Footer
 # --------------------
 st.sidebar.markdown("---")
-st.sidebar.markdown("依存: pillow, streamlit")
-st.sidebar.caption("実行: pip install streamlit pillow\nstreamlit run app.py")
+st.sidebar.markdown("実装: [streamlit-photo-gallery](https://github.com/tondol/streamlit-photo-gallery)")
