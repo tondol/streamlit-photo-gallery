@@ -22,7 +22,9 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff"}
 THUMB_SIZE = (320, 320)
 THUMB_DIRNAME = ".thumbnails"
 
-st.set_page_config(page_title="画像ギャラリー", layout="wide")
+st.set_page_config(page_title="streamlit-photo-gallery", layout="wide")
+
+# dialog内の画像を目一杯表示する調整
 st.markdown(
     """
 <style>
@@ -189,8 +191,6 @@ if "checked" not in st.session_state:
 # --------------------
 # Sidebar / settings
 # --------------------
-st.sidebar.title("設定")
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--base-dir', '-d', type=str, default='.')
 args = parser.parse_args()
@@ -237,23 +237,19 @@ with st.sidebar.container():
             st.session_state.checked = {}
             # rerunしないとcheckboxに反映されないことがある
             st.rerun()
-    cnt = sum([1 for _, v in st.session_state.checked.items() if v])
-    if st.sidebar.button(f"{cnt}件を削除"):
-        to_delete: List[str] = []
-        for k, v in st.session_state.checked.items():
-            if v:
-                p = images[int(k)][0]
-                to_delete.append(str(p))
-        if len(to_delete) > 0:
-            st.session_state.to_delete = to_delete
-        else:
-            st.sidebar.info("削除する画像が選択されていません。")
+    to_delete: List[str] = []
+    for k, v in st.session_state.checked.items():
+        if v:
+            img_p = images[int(k)][0]
+            to_delete.append(str(img_p))
+    if st.sidebar.button(f"{len(to_delete)}件を削除", disabled=not bool(to_delete)):
+        st.session_state.to_delete = to_delete
 
 
 # --------------------
 # Main gallery UI
 # --------------------
-st.markdown(f"## ギャラリー `{selected_subdir}`")
+st.markdown(f"## {selected_subdir} | {len(images)}件の画像")
 
 if not images:
     st.info("このディレクトリに表示条件に合う画像が見つかりません。")
@@ -292,17 +288,15 @@ def show_preview():
         st.write(f"パス: {img_p}")
         [c1, c2, c3] = st.columns([1, 1, 1])
         with c1:
-            if st.button("⏪️ J"):
-                if img_i - 1 >= 0:
-                    st.session_state.preview_index = img_i - 1
-                    # rerunした方が切替がスムーズ
-                    st.rerun(scope="fragment")
+            if st.button("⏪️ J", disabled=img_i - 1 < 0):
+                st.session_state.preview_index = img_i - 1
+                # rerunした方が切替がスムーズ
+                st.rerun(scope="fragment")
         with c2:
-            if st.button("⏩️ K"):
-                if img_i + 1 < len(images):
-                    st.session_state.preview_index = img_i + 1
-                    # rerunした方が切替がスムーズ
-                    st.rerun(scope="fragment")
+            if st.button("⏩️ K", disabled=img_i + 1 >= len(images)):
+                st.session_state.preview_index = img_i + 1
+                # rerunした方が切替がスムーズ
+                st.rerun(scope="fragment")
         with c3:
             if st.button("削除 (この画像のみ)", key="dialog_delete"):
                 to_delete = [str(img_p)]
@@ -310,6 +304,7 @@ def show_preview():
                 st.session_state.preview_index = -1
                 st.rerun()
     
+    # J, Kキーで画像送りする機能
     components.html(
         """
 <script>
