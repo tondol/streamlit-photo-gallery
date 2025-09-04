@@ -5,13 +5,14 @@ Streamlit 画像ギャラリー
   pip install streamlit pillow
 
 実行:
-  streamlit run app.py
+  streamlit run app.py -- [-d base_dir]
 """
 import os
 import time
 import hashlib
 from pathlib import Path
 from typing import List, Tuple
+import argparse
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -189,8 +190,12 @@ if "checked" not in st.session_state:
 # Sidebar / settings
 # --------------------
 st.sidebar.title("設定")
-base_dir_input = st.sidebar.text_input("起点ディレクトリ", value=str(Path.cwd()))
-base_dir = Path(base_dir_input).expanduser()
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--base-dir', '-d', type=str, default='.')
+args = parser.parse_args()
+
+base_dir = Path(args.base_dir).expanduser()
 if not base_dir.exists() or not base_dir.is_dir():
     st.sidebar.error("指定されたディレクトリが見つかりません。")
     st.stop()
@@ -200,18 +205,12 @@ if not subdirs:
     st.sidebar.info("起点ディレクトリにサブディレクトリがありません。")
     st.stop()
 
-selected_subdir = st.sidebar.selectbox("サブディレクトリを選択", [p.name for p in subdirs])
+selected_subdir = st.sidebar.selectbox("サブディレクトリを選択", ["."] + [p.name for p in subdirs])
 target_dir = base_dir / selected_subdir
 
-st.sidebar.markdown("---")
-sort_by = st.sidebar.selectbox("並び替え", ["名前 (昇順)", "名前 (降順)", "更新日時 (新しい順)", "更新日時 (古い順)"])
-cols_per_row = st.sidebar.slider("1行当たりの項目数", 1, 6, 6)
+sort_by = st.sidebar.selectbox("並び替え", ["名前 (昇順)", "名前 (降順)", "更新日時 (新しい順)", "更新日時 (古い順)"], 1)
+cols_per_row = st.sidebar.slider("1行当たりの項目数", 1, 6, 4)
 
-
-# --------------------
-# Main gallery UI
-# --------------------
-st.header(f"ギャラリー : {selected_subdir}")
 images = list_images(target_dir)
 
 if sort_by == "名前 (昇順)":
@@ -223,6 +222,41 @@ elif sort_by == "更新日時 (新しい順)":
 else:
     images.sort(key=lambda x: x[1])
 
+if st.sidebar.button("リロード"):
+    st.rerun()
+
+st.sidebar.markdown("---")
+
+with st.sidebar.container():
+    c1, c2 = st.sidebar.columns([1, 1])
+    with c1:
+        if st.button("全選択"):
+            for i, _ in enumerate(images):
+                st.session_state.checked[str(i)] = True
+            # rerunしないとcheckboxに反映されないことがある
+            st.rerun()
+    with c2:
+        if st.button("全解除"):
+            st.session_state.checked = {}
+            # rerunしないとcheckboxに反映されないことがある
+            st.rerun()
+    cnt = sum([1 if v else 0 for _, v in st.session_state.checked.items()])
+    if st.sidebar.button(f"{cnt}件を削除"):
+        to_delete = []
+        for k, v in st.session_state.checked.items():
+            if v:
+                p = images[int(k)][0]
+                to_delete.append(str(p))
+        if len(to_delete) > 0:
+            st.session_state.to_delete = to_delete
+        else:
+            st.sidebar.info("削除する画像が選択されていません。")
+
+
+# --------------------
+# Main gallery UI
+# --------------------
+st.markdown(f"## ギャラリー `{selected_subdir}`")
 
 if not images:
     st.info("このディレクトリに表示条件に合う画像が見つかりません。")
@@ -241,43 +275,12 @@ else:
             st.checkbox("選択", key=key, value=value, on_change=checkbox_on_change(img_i))
             b1, b2 = st.columns([1, 1])
             with b1:
-                if st.button("プレビュー", key=f"preview_{img_i}"):
+                if st.button("拡大", key=f"preview_{img_i}"):
                     st.session_state.preview_index = img_i
             with b2:
                 if st.button("削除", key=f"delete_{img_i}"):
                     to_delete = [str(img_p)]
                     st.session_state.to_delete = to_delete
-    
-    st.markdown("---")
-    
-    # action bar
-    with st.container():
-        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-        with c1:
-            if st.button("すべて選択"):
-                for i, _ in enumerate(images):
-                    st.session_state.checked[str(i)] = True
-                # rerunしないとcheckboxに反映されないことがある
-                st.rerun()
-        with c2:
-            if st.button("すべて解除"):
-                st.session_state.checked = {}
-                # rerunしないとcheckboxに反映されないことがある
-                st.rerun()
-        with c3:
-            cnt = sum([1 if v else 0 for _, v in st.session_state.checked.items()])
-            st.markdown(f"**選択中: {cnt} 件**")
-        with c4:
-            if st.button("選択を削除"):
-                to_delete = []
-                for k, v in st.session_state.checked.items():
-                    if v:
-                        p = images[int(k)][0]
-                        to_delete.append(str(p))
-                if len(to_delete) > 0:
-                    st.session_state.to_delete = to_delete
-                else:
-                    st.info("削除する画像が選択されていません。")
 
 
 # --------------------
@@ -285,29 +288,6 @@ else:
 # --------------------
 @st.dialog("プレビュー", width="medium", on_dismiss=show_preview_on_dismiss)
 def show_preview():
-    components.html(
-        """
-<script>
-const doc = window.parent.document;
-const buttons = Array.from(doc.querySelectorAll('button[kind=secondary]'));
-const prev_button = buttons.find(el => el.innerText === '⏪️ J');
-const next_button = buttons.find(el => el.innerText === '⏩️ K');
-doc.addEventListener('keydown', function(e) {
-    switch (e.keyCode) {
-        case 74: // j
-            prev_button.click();
-            break;
-        case 75: // k
-            next_button.click();
-            break;
-    }
-});
-</script>
-        """,
-        width=0,
-        height=0
-    )
-    
     if "preview_index" in st.session_state:
         img_i = int(st.session_state.preview_index)
         img_p = images[img_i][0]
@@ -332,6 +312,29 @@ doc.addEventListener('keydown', function(e) {
                 st.session_state.to_delete = to_delete
                 st.session_state.preview_index = -1
                 st.rerun()
+    
+    components.html(
+        """
+<script>
+const doc = window.parent.document;
+const buttons = Array.from(doc.querySelectorAll('button[kind=secondary]'));
+const prev_button = buttons.find(el => el.innerText === '⏪️ J');
+const next_button = buttons.find(el => el.innerText === '⏩️ K');
+doc.addEventListener('keydown', function(e) {
+    switch (e.keyCode) {
+        case 74: // j
+            prev_button.click();
+            break;
+        case 75: // k
+            next_button.click();
+            break;
+    }
+});
+</script>
+        """,
+        width=0,
+        height=0
+    )
 
 
 @st.dialog("削除確認", on_dismiss=confirm_delete_on_dismiss)
