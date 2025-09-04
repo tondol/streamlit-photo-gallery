@@ -1,8 +1,8 @@
 """
-Streamlit 画像ギャラリー
+streamlit-photo-gallery
 
 前提:
-  pip install streamlit pillow
+  pip install -r requirements.txt
 
 実行:
   streamlit run app.py -- [-d base_dir]
