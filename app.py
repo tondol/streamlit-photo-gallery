@@ -11,7 +11,7 @@ import os
 import time
 import hashlib
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import argparse
 
 import streamlit as st
@@ -68,7 +68,7 @@ def list_subdirs(base: Path) -> List[Path]:
 
 
 def list_images(dirpath: Path) -> List[Tuple[Path, float]]:
-    out = []
+    out: List[Tuple[Path, float]] = []
     try:
         for p in dirpath.iterdir():
             if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
@@ -79,7 +79,7 @@ def list_images(dirpath: Path) -> List[Tuple[Path, float]]:
 
 
 def ensure_thumb_dir(dirpath: Path) -> Path:
-    td = dirpath / THUMB_DIRNAME
+    td: Path = dirpath / THUMB_DIRNAME
     td.mkdir(exist_ok=True)
     return td
 
@@ -120,10 +120,10 @@ def generate_thumbnail_if_needed(image_path: Path, thumb_path: Path, size=THUMB_
             resized = img.resize((new_w, new_h), resample=Image.LANCZOS)
 
             # Create white background canvas (RGB) and paste centered
-            canvas = Image.new("RGB", size, (255, 255, 255))
+            canvas = Image.new("RGB", size, (223, 223, 223))
             # If the resized image has alpha, composite onto white background first
             if resized.mode in ("RGBA", "LA") or ("transparency" in resized.info):
-                bg = Image.new("RGBA", resized.size, (255, 255, 255, 255))
+                bg = Image.new("RGBA", resized.size, (223, 223, 223, 255))
                 bg.paste(resized, (0, 0), resized)
                 resized_rgb = bg.convert("RGB")
             else:
@@ -179,11 +179,11 @@ def confirm_delete_on_dismiss():
 # Session state init
 # --------------------
 if "preview_index" not in st.session_state:
-    st.session_state.preview_index = -1
+    st.session_state.preview_index: int = -1
 if "to_delete" not in st.session_state:
-    st.session_state.to_delete = []
+    st.session_state.to_delete: List[str] = []
 if "checked" not in st.session_state:
-    st.session_state.checked = {}
+    st.session_state.checked: Dict[int, bool] = {}
 
 
 # --------------------
@@ -195,23 +195,20 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--base-dir', '-d', type=str, default='.')
 args = parser.parse_args()
 
-base_dir = Path(args.base_dir).expanduser()
+base_dir: Path = Path(args.base_dir).expanduser()
 if not base_dir.exists() or not base_dir.is_dir():
     st.sidebar.error("指定されたディレクトリが見つかりません。")
     st.stop()
 
-subdirs = list_subdirs(base_dir)
-if not subdirs:
-    st.sidebar.info("起点ディレクトリにサブディレクトリがありません。")
-    st.stop()
+subdirs: List[Path] = list_subdirs(base_dir)
 
-selected_subdir = st.sidebar.selectbox("サブディレクトリを選択", ["."] + [p.name for p in subdirs])
-target_dir = base_dir / selected_subdir
+selected_subdir: List[str] = st.sidebar.selectbox("サブディレクトリを選択", ["."] + [p.name for p in subdirs])
+target_dir: Path = base_dir / selected_subdir
 
 sort_by = st.sidebar.selectbox("並び替え", ["名前 (昇順)", "名前 (降順)", "更新日時 (新しい順)", "更新日時 (古い順)"], 1)
 cols_per_row = st.sidebar.slider("1行当たりの項目数", 1, 6, 4)
 
-images = list_images(target_dir)
+images: List[Tuple[Path, float]] = list_images(target_dir)
 
 if sort_by == "名前 (昇順)":
     images.sort(key=lambda x: x[0].name.lower())
@@ -240,9 +237,9 @@ with st.sidebar.container():
             st.session_state.checked = {}
             # rerunしないとcheckboxに反映されないことがある
             st.rerun()
-    cnt = sum([1 if v else 0 for _, v in st.session_state.checked.items()])
+    cnt = sum([1 for _, v in st.session_state.checked.items() if v])
     if st.sidebar.button(f"{cnt}件を削除"):
-        to_delete = []
+        to_delete: List[str] = []
         for k, v in st.session_state.checked.items():
             if v:
                 p = images[int(k)][0]
@@ -262,12 +259,12 @@ if not images:
     st.info("このディレクトリに表示条件に合う画像が見つかりません。")
 else:
     # image grid
-    thumb_dir = ensure_thumb_dir(target_dir)
+    thumb_dir: Path = ensure_thumb_dir(target_dir)
     columns = st.columns(cols_per_row)
     
     for img_i, (img_p, _) in enumerate(images):
         column = columns[img_i % cols_per_row]
-        thumb = generate_thumbnail_if_needed(img_p, thumb_path_for(img_p, thumb_dir))
+        thumb: Path = generate_thumbnail_if_needed(img_p, thumb_path_for(img_p, thumb_dir))
         with column:
             st.image(str(thumb), use_container_width=True, caption=img_p.name)
             key = f"raw_checked_{img_i}"
@@ -289,8 +286,8 @@ else:
 @st.dialog("プレビュー", width="medium", on_dismiss=show_preview_on_dismiss)
 def show_preview():
     if "preview_index" in st.session_state:
-        img_i = int(st.session_state.preview_index)
-        img_p = images[img_i][0]
+        img_i: int = int(st.session_state.preview_index)
+        img_p: str = images[img_i][0]
         st.image(img_p)
         st.write(f"パス: {img_p}")
         [c1, c2, c3] = st.columns([1, 1, 1])
@@ -339,8 +336,8 @@ doc.addEventListener('keydown', function(e) {
 
 @st.dialog("削除確認", on_dismiss=confirm_delete_on_dismiss)
 def confirm_delete():
-    to_delete = st.session_state.to_delete or []
-    to_delete = to_delete[:200]
+    to_delete: List[str] = st.session_state.to_delete or []
+    to_delete: List[str] = to_delete[:200]
     st.warning(f"本当に削除しますか？ {len(to_delete)} 件の画像が削除されます。これは元に戻せません。")
     for p in to_delete:
         st.write(p)
@@ -360,7 +357,7 @@ def confirm_delete():
 # dialogの表示状態をsession管理にしている
 if st.session_state.preview_index >= 0:
     show_preview()
-if len(st.session_state.to_delete) > 0:
+if st.session_state.to_delete:
     confirm_delete()
 
 
