@@ -262,7 +262,7 @@ else:
         column = columns[img_i % cols_per_row]
         thumb: Path = generate_thumbnail_if_needed(img_p, thumb_path_for(img_p, thumb_dir))
         with column:
-            st.image(str(thumb), use_container_width=True, caption=img_p.name)
+            st.image(str(thumb), width='stretch', caption=img_p.name)
             key = f"raw_checked_{img_i}"
             value = st.session_state.checked.get(str(img_i))
             st.checkbox("選択", key=key, value=value, on_change=checkbox_on_change(img_i))
